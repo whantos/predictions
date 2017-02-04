@@ -1,0 +1,172 @@
+---
+title: Prediction of exercisetype based on data from accelerometers on belt, forearm,
+  arm, and dumbell
+author: "Karl-Heinz Reisenauer"
+date: "17 Januar 2017"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+<style>
+pre {
+font-size:12px;
+}
+</style>
+# Synopsis
+
+In this work we generate a model to predict the performed excercise based on data from accelerometers on belt, forearm, arm, and dumbell.  
+We compare three prediction models and show that in this case Random Forest achieved the best Accuracy with 99.39%.
+
+
+## First look and Normalization
+
+```{r load_and_explore, echo = FALSE, error=FALSE, warning=FALSE,message=FALSE}
+library(data.table, quietly = TRUE)
+library(caret, quietly = TRUE)
+library(rpart, quietly = TRUE)
+library(gbm, quietly = TRUE)
+library(plyr, quietly = TRUE)
+library(randomForest, verbose = FALSE, warn.conflicts = FALSE)
+
+set.seed(8260115)
+setwd("~/Data Science/Coursera/08 - Practical_machine_learning/projekt")
+pml_training_data <- fread("data/pml-training.csv", na.strings = c("NA","", "#DIV/0!"))
+```
+A first look at the data (see Figure 1 in the appendix) tells us that there are 19622 observations on 160 variables, including variables related to time points and executing person. Since we are not interested in a comparison between subjects, we remove this data. There are also many zero values that we need to take care of.
+The excercise type is stored in the classe-Variable.
+
+## Normalize
+First we remove time- and subject based Variables.
+
+```{r normalize1}
+# Remove time- and subject based Variables
+pml_training_data <- pml_training_data[,-c(1:7),with=FALSE]
+# factorize the classe - Vriable
+pml_training_data$classe <- as.factor(pml_training_data$classe)
+```
+
+Also we've seen that there are a bunch ob Null Values. To decide how to deal with them, we check the percentage of non-nulls for each variable.
+```{r check-null_values}
+noNullRatio <- sapply(pml_training_data, function(x) {
+                    floor(sum(!is.na(x))/length(pml_training_data$classe)*100)}
+                    )
+table(noNullRatio)
+```
+
+Of all variables, only 53 are filled to 100%. The remaining 100 variables are filled to max. 2%. Since we cannot use a meaningful filling logic with such a small filling-rate, we remove these variables.
+
+```{r remove null}
+## keep only Variables with fillrate = 100%
+pml_training_data <- pml_training_data[,names(noNullRatio[noNullRatio == 100]), with=FALSE]
+```
+
+## Test and Cross Validation Strategie
+
+First we split da Data in a Training and a Testdataset. Since we have a lot of observations, we can split the date in 70% training and 30% testdata.
+```{r}
+# Split 60% Training an 40 % test for validation
+inTrain <- createDataPartition(y=pml_training_data$classe, p=0.7, list=FALSE)
+training <- pml_training_data [inTrain,]
+testing <- pml_training_data [-inTrain,]
+```
+
+Then we define a trainControl method for using in all model-fitting.
+We use the Repeated Cross Validation Method with 5 resamplings and 2 repeats.
+
+```{r cache=TRUE}
+## fitControl for all models
+fitControl <- trainControl(method = "repeatedcv", number = 5, repeats = 2)
+```
+
+## Train the Model
+Next, we use three prediction models to check which is the most appropriate to determine the different exercises.  
+We compare Decision Trees, Generalized Boosted Regression and Random Forest to determine the best prediction model.
+
+```{r cache=TRUE}
+### Decision Tree
+modFitTree <- train(classe ~ .,method="rpart",data=training,trControl = fitControl)
+predictionsTree <- predict(modFitTree, testing)
+
+## Boost
+modFitGBM <- train(classe ~ ., data=training, method = "gbm", trControl = fitControl, 
+                   verbose = FALSE)
+predictionsGBM <- predict(modFitGBM, testing)
+### Random Forest
+modFitRF <- train(classe ~ ., data=training, method = "rf", trControl = fitControl,
+                  prox=TRUE, verbose = FALSE)
+predictionsRF <- predict(modFitRF, testing)
+```
+
+
+## Model compare
+After fitting the Models, we compare the prediction Accuracy of the three Models with the Testdataset.
+
+
+<table><tr>
+<td><label>Decision Tree</label></td>
+<td><label>Generalized Boosted Regression</label></td>
+<td><label>Random Forest</label></td>
+</tr>
+<tr>
+<td>
+```{r cache=TRUE, comment= ""}
+cmTree <- confusionMatrix(predictionsTree, testing$classe)
+cmTree$table
+round(cmTree$overall["Accuracy"]*100,2) 
+```
+</td>
+<td>
+```{r cache=TRUE , comment= ""}
+cmGBM <- confusionMatrix(predictionsGBM, testing$classe)
+cmGBM$table
+round(cmGBM$overall["Accuracy"]*100,2)
+```
+</td>
+<td>
+```{r cache=TRUE , comment= ""}
+
+cmRF <- confusionMatrix(predictionsRF, testing$classe)
+cmRF$table
+round(cmRF$overall["Accuracy"]*100,2) 
+```
+</td>
+</tr></table>
+
+We ignore the decision trees, since they have a clearly too small accuracy with just about 49.5%.
+
+GBM has a very good result with a 96.24% Accuracy. But Random forest has an outstanding Accuracy of 99.39%, but has used almost 10 times longer for the calculation.
+
+## Conclusion 
+The Out of Sample Error Rate is 3.76% for Generalized Boosted Regression and 0.61% for Random Forest. Since the values of Random Forest are so outstanding and this Project is not time-critical, I choose Random Forest as final Model.
+
+## Apply Model on Quiz Testdata
+
+```{r}
+pml_test_data <- fread("data/pml-testing.csv", na.strings = c("NA","", "#DIV/0!"))
+trainColNames <- colnames(training[,-53])
+pml_test_data <- pml_test_data[,trainColNames, with=FALSE]
+predictionsRFTest <- predict(modFitRF, pml_test_data)
+predictionsRFTest
+```
+\newpage
+## Appendix 
+### Figure 1: Load the data and first look
+```{r load_and_explore_app}
+library(data.table)
+library(caret)
+library(rpart)
+library(randomForest)
+
+set.seed(8260115)
+setwd("~/Data Science/Coursera/08 - Practical_machine_learning/projekt")
+pml_training_data <- fread("data/pml-training.csv", na.strings = c("NA","", "#DIV/0!"))
+
+## explore
+paste("variables: ",length(colnames(pml_training_data)),", observations: ",length(pml_training_data$classe))
+
+#str(pml_training_data)
+```
